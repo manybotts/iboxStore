@@ -1,6 +1,5 @@
 import os
 import asyncio
-from threading import Thread
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -11,7 +10,6 @@ from telegram.ext import (
     CallbackContext,
 )
 from pymongo import MongoClient
-from waitress import serve
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -19,7 +17,7 @@ app = Flask(__name__)
 # Load environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
-RAILWAY_URL = os.getenv("RAILWAY_URL")  # Public URL provided by Railway
+RAILWAY_URL = os.getenv("RAILWAY_STATIC_URL")  # Public URL provided by Railway
 ADMINS = [int(admin_id) for admin_id in os.getenv("ADMINS", "").split(",") if admin_id]
 
 # Connect to MongoDB
@@ -111,9 +109,9 @@ async def broadcast(update: Update, context: CallbackContext):
 
 
 # ========== WEBHOOK ENDPOINT ==========
-@app.route("/webhook", methods=["POST"])
+@app.route("/", methods=["POST"])
 async def webhook():
-    application = Application.builder().token(BOT_TOKEN).build()
+    global application  # Use the globally initialized application
     update = Update.de_json(request.get_json(force=True), application.bot)
     asyncio.create_task(application.process_update(update))
     return "ok"
@@ -121,6 +119,7 @@ async def webhook():
 
 # ========== BOT MAIN FUNCTION ==========
 async def bot_main():
+    global application  # Make the application accessible globally
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Add handlers
@@ -134,36 +133,18 @@ async def bot_main():
     # Initialize the application
     await application.initialize()
 
-    # Start webhook for production
-    if RAILWAY_URL:
-        await application.updater.start_webhook(
-            listen="0.0.0.0",
-            port=int(os.getenv("PORT", 8000)),
-            url_path="/webhook",
-            webhook_url=f"{RAILWAY_URL}/webhook",
-            drop_pending_updates=True,
-        )
-    else:
-        # Fallback to polling for local development
-        await application.updater.start_polling()
-
     # Run the bot until interrupted
     try:
         await application.start()
-        await application.run_forever()
+        while True:
+            await asyncio.sleep(3600)  # Keep the bot running
     finally:
         await application.stop()
 
 
-# ========== SERVER SETUP ==========
-def run_flask():
-    """Run Flask production server"""
-    serve(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-
-
 # ========== RUN BOT ==========
-def run_bot():
-    """Wrapper to run the async bot"""
+if __name__ == "__main__":
+    # Initialize and run the bot
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -176,12 +157,3 @@ def run_bot():
         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
     finally:
         loop.close()
-
-
-if __name__ == "__main__":
-    # Start Flask in a separate thread
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
-    # Start Telegram bot in the main thread
-    run_bot()
