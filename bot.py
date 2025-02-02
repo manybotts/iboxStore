@@ -1,5 +1,6 @@
 import os
 import asyncio
+import requests  # Added for webhook setup
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -117,6 +118,25 @@ async def webhook():
     return "ok"
 
 
+# ========== AUTOMATED WEBHOOK SETUP ==========
+async def set_telegram_webhook():
+    """Set the Telegram bot webhook."""
+    if not RAILWAY_URL or not BOT_TOKEN:
+        print("Webhook setup skipped: Missing RAILWAY_URL or BOT_TOKEN.")
+        return
+
+    webhook_url = f"{RAILWAY_URL}/"
+    response = requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
+        json={"url": webhook_url},
+    )
+
+    if response.ok:
+        print(f"Webhook set successfully: {webhook_url}")
+    else:
+        print(f"Failed to set webhook: {response.text}")
+
+
 # ========== BOT MAIN FUNCTION ==========
 async def bot_main():
     global application  # Make the application accessible globally
@@ -132,6 +152,9 @@ async def bot_main():
 
     # Initialize the application
     await application.initialize()
+
+    # Set the webhook
+    await set_telegram_webhook()
 
     # Run the bot until interrupted
     try:
