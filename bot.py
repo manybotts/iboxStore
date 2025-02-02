@@ -28,10 +28,28 @@ db = client["TelegramBot"]
 users_collection = db["users"]
 files_collection = db["files"]
 
-# [Keep all your handler functions unchanged - start, handle_file, batch_files, broadcast]
-# [Ensure they all use async/await syntax]
+# ========== HANDLER FUNCTIONS MUST BE DEFINED FIRST ==========
+async def start(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_id = update.message.from_user.id
 
-# Webhook endpoint
+    if not users_collection.find_one({"user_id": user_id}):
+        users_collection.insert_one({"user_id": user_id, "chat_id": chat_id})
+
+    await update.message.reply_text(
+        "Welcome! Send me any file, and I'll generate a shareable link for it."
+    )
+
+async def handle_file(update: Update, context: CallbackContext):
+    # ... [Keep your existing handle_file implementation] ...
+
+async def batch_files(update: Update, context: CallbackContext):
+    # ... [Keep your existing batch_files implementation] ...
+
+async def broadcast(update: Update, context: CallbackContext):
+    # ... [Keep your existing broadcast implementation] ...
+
+# ========== WEBHOOK ENDPOINT ==========
 @app.route("/webhook", methods=["POST"])
 async def webhook():
     application = Application.builder().token(BOT_TOKEN).build()
@@ -39,6 +57,7 @@ async def webhook():
     await application.process_update(update)
     return "ok"
 
+# ========== SERVER SETUP ==========
 def run_flask():
     """Run Flask production server"""
     serve(app, host="0.0.0.0", port=int(os.getenv("PORT", 8443)))
@@ -47,7 +66,7 @@ async def bot_main():
     """Main async function for bot setup"""
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Add handlers
+    # Now these handler references will work
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(
         filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -56,26 +75,7 @@ async def bot_main():
     application.add_handler(CommandHandler("batch", batch_files))
     application.add_handler(CommandHandler("broadcast", broadcast))
 
-    # Initialize the application
-    await application.initialize()
-
-    if os.getenv("ENV") == "production":
-        await application.start()
-        await application.updater.start_webhook(
-            listen="0.0.0.0",
-            port=int(os.getenv("PORT", 8443)),
-            webhook_url=f"{HEROKU_URL}/webhook",
-            drop_pending_updates=True
-        )
-    else:
-        await application.start()
-        await application.updater.start_polling()
-
-    # Keep running until interrupted
-    while True:
-        await asyncio.sleep(3600)
-
-    await application.stop()
+    # ... [Rest of your bot_main implementation] ...
 
 def run_bot():
     """Wrapper to run the async bot"""
