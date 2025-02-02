@@ -1,1 +1,3 @@
-pip install python-telegram-bot pymongo flask
+python-telegram-bot
+pymongo
+flask
