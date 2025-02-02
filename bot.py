@@ -144,7 +144,7 @@ def webhook():
 # Main function
 if __name__ == "__main__":
     # Initialize the Telegram bot
-    updater = Updater(token=BOT_TOKEN)  # Remove use_context=True for v20.x+
+    updater = Updater(bot_token=BOT_TOKEN)  # Use bot_token= instead of token=  # Remove use_context=True for v20.x+
     dispatcher = updater.dispatcher
 
     # Add handlers
