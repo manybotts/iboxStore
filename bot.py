@@ -5,7 +5,7 @@ from telegram.ext import (
     Updater,
     CommandHandler,
     MessageHandler,
-    Filters,
+    filters,
     CallbackContext,
     CallbackQueryHandler,
 )
@@ -144,12 +144,15 @@ def webhook():
 # Main function
 if __name__ == "__main__":
     # Initialize the Telegram bot
-    updater = Updater(token=BOT_TOKEN, use_context=True)
+    updater = Updater(token=BOT_TOKEN)  # Remove use_context=True for v20.x+
     dispatcher = updater.dispatcher
 
     # Add handlers
     dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(Filters.document | Filters.photo | Filters.video, handle_file))
+    dispatcher.add_handler(MessageHandler(
+        filters.Document.ALL | filters.PHOTO | filters.VIDEO,  # Updated filters
+        handle_file
+    ))
     dispatcher.add_handler(CommandHandler("batch", batch_files))
     dispatcher.add_handler(CommandHandler("broadcast", broadcast))
 
@@ -157,13 +160,14 @@ if __name__ == "__main__":
     PORT = int(os.getenv("PORT", "8443"))
     HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")
 
-    # Uncomment the following lines for Heroku deployment
-    # updater.start_webhook(listen="0.0.0.0",
-    #                        port=PORT,
-    #                        url_path=BOT_TOKEN,
-    #                        webhook_url=f"https://{HEROKU_APP_NAME}.herokuapp.com/{BOT_TOKEN}")
+    # For production deployment (uncomment these lines)
+    # updater.start_webhook(
+    #     listen="0.0.0.0",
+    #     port=PORT,
+    #     webhook_url=f"{HEROKU_URL}/webhook"
+    # )
 
-    # Uncomment the following line for local testing
+    # For local testing (uncomment this line)
     # updater.start_polling()
 
     # Start the Flask app
