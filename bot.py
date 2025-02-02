@@ -28,7 +28,7 @@ db = client["TelegramBot"]
 users_collection = db["users"]
 files_collection = db["files"]
 
-# ========== HANDLER FUNCTIONS MUST BE DEFINED FIRST ==========
+# ========== HANDLER FUNCTIONS ==========
 async def start(update: Update, context: CallbackContext):
     chat_id = update.message.chat_id
     user_id = update.message.from_user.id
@@ -41,13 +41,83 @@ async def start(update: Update, context: CallbackContext):
     )
 
 async def handle_file(update: Update, context: CallbackContext):
-    # ... [Keep your existing handle_file implementation] ...
+    message = update.message
+    user_id = message.from_user.id
+
+    if user_id not in ADMINS:
+        await message.reply_text("You are not authorized to upload files.")
+        return
+
+    if message.document:
+        file_obj = message.document
+    elif message.photo:
+        file_obj = message.photo[-1]
+    elif message.video:
+        file_obj = message.video
+    else:
+        await message.reply_text("Please send a valid file.")
+        return
+
+    file_data = {
+        "file_id": file_obj.file_id,
+        "file_unique_id": file_obj.file_unique_id,
+        "uploaded_by": user_id,
+    }
+    files_collection.insert_one(file_data)
+
+    persistent_link = f"https://t.me/{context.bot.username}?start={file_obj.file_unique_id}"
+    await message.reply_text(
+        f"File uploaded successfully!\nShareable Link: {persistent_link}"
+    )
 
 async def batch_files(update: Update, context: CallbackContext):
-    # ... [Keep your existing batch_files implementation] ...
+    user_id = update.message.from_user.id
+
+    if user_id not in ADMINS:
+        await update.message.reply_text("You are not authorized to view batch files.")
+        return
+
+    uploaded_files = files_collection.find({"uploaded_by": user_id})
+
+    if not uploaded_files.count():
+        await update.message.reply_text("You haven't uploaded any files yet.")
+        return
+
+    buttons = [
+        [InlineKeyboardButton(f"File {i + 1}", url=f"https://t.me/{context.bot.username}?start={file['file_unique_id']}")]
+        for i, file in enumerate(uploaded_files)
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+
+    await update.message.reply_text(
+        "Here are all your uploaded files:", 
+        reply_markup=reply_markup
+    )
 
 async def broadcast(update: Update, context: CallbackContext):
-    # ... [Keep your existing broadcast implementation] ...
+    user_id = update.message.from_user.id
+
+    if user_id not in ADMINS:
+        await update.message.reply_text("You are not authorized to broadcast messages.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+
+    broadcast_message = " ".join(context.args)
+    users = users_collection.find()
+    
+    for user in users:
+        try:
+            await context.bot.send_message(
+                chat_id=user["chat_id"], 
+                text=broadcast_message
+            )
+        except Exception as e:
+            print(f"Failed to send message to user {user['chat_id']}: {e}")
+
+    await update.message.reply_text("Message broadcasted successfully.")
 
 # ========== WEBHOOK ENDPOINT ==========
 @app.route("/webhook", methods=["POST"])
@@ -66,7 +136,7 @@ async def bot_main():
     """Main async function for bot setup"""
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Now these handler references will work
+    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(
         filters.Document.ALL | filters.PHOTO | filters.VIDEO,
@@ -75,7 +145,26 @@ async def bot_main():
     application.add_handler(CommandHandler("batch", batch_files))
     application.add_handler(CommandHandler("broadcast", broadcast))
 
-    # ... [Rest of your bot_main implementation] ...
+    # Initialize the application
+    await application.initialize()
+
+    if os.getenv("ENV") == "production":
+        await application.start()
+        await application.updater.start_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv("PORT", 8443)),
+            webhook_url=f"{HEROKU_URL}/webhook",
+            drop_pending_updates=True
+        )
+    else:
+        await application.start()
+        await application.updater.start_polling()
+
+    # Keep running until interrupted
+    while True:
+        await asyncio.sleep(3600)
+
+    await application.stop()
 
 def run_bot():
     """Wrapper to run the async bot"""
