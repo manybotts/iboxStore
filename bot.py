@@ -1,3 +1,77 @@
+import os
+import asyncio
+from threading import Thread
+from flask import Flask, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    CallbackContext,
+    CallbackQueryHandler,
+)
+from pymongo import MongoClient
+
+# Initialize Flask app
+app = Flask(__name__)
+
+# Load environment variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+HEROKU_URL = os.getenv("HEROKU_URL")
+ADMINS = [int(admin_id) for admin_id in os.getenv("ADMINS", "").split(",")]
+
+# Connect to MongoDB
+client = MongoClient(MONGO_URI)
+db = client["TelegramBot"]
+users_collection = db["users"]
+files_collection = db["files"]
+
+# Start command handler
+async def start(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_id = update.message.from_user.id
+
+    if not users_collection.find_one({"user_id": user_id}):
+        users_collection.insert_one({"user_id": user_id, "chat_id": chat_id})
+
+    await update.message.reply_text(
+        "Welcome! Send me any file, and I'll generate a shareable link for it."
+    )
+
+# Handle file uploads
+async def handle_file(update: Update, context: CallbackContext):
+    message = update.message
+    user_id = message.from_user.id
+
+    if user_id not in ADMINS:
+        await message.reply_text("You are not authorized to upload files.")
+        return
+
+    if message.document:
+        file_obj = message.document
+    elif message.photo:
+        file_obj = message.photo[-1]
+    elif message.video:
+        file_obj = message.video
+    else:
+        await message.reply_text("Please send a valid file.")
+        return
+
+    file_data = {
+        "file_id": file_obj.file_id,
+        "file_unique_id": file_obj.file_unique_id,
+        "uploaded_by": user_id,
+    }
+    files_collection.insert_one(file_data)
+
+    persistent_link = f"https://t.me/{context.bot.username}?start={file_obj.file_unique_id}"
+    await message.reply_text(
+        f"File uploaded successfully!\nShareable Link: {persistent_link}"
+    )
+
+# Handle batch file sharing
 async def batch_files(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
 
@@ -5,14 +79,12 @@ async def batch_files(update: Update, context: CallbackContext):
         await update.message.reply_text("You are not authorized to view batch files.")
         return
 
-    # Retrieve all files uploaded by the admin
     uploaded_files = files_collection.find({"uploaded_by": user_id})
 
     if not uploaded_files.count():
         await update.message.reply_text("You haven't uploaded any files yet.")
         return
 
-    # Create a keyboard with all the file links
     buttons = [
         [InlineKeyboardButton(f"File {i + 1}", url=f"https://t.me/{context.bot.username}?start={file['file_unique_id']}")]
         for i, file in enumerate(uploaded_files)
@@ -23,6 +95,7 @@ async def batch_files(update: Update, context: CallbackContext):
         "Here are all your uploaded files:", reply_markup=reply_markup
     )
 
+# Broadcast messages
 async def broadcast(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
 
@@ -48,7 +121,7 @@ async def broadcast(update: Update, context: CallbackContext):
 
     await update.message.reply_text("Message broadcasted successfully.")
 
-# Webhook endpoint for Flask
+# Webhook endpoint
 @app.route("/webhook", methods=["POST"])
 async def webhook():
     application = Application.builder().token(BOT_TOKEN).build()
@@ -56,8 +129,8 @@ async def webhook():
     await application.process_update(update)
     return "ok"
 
-if __name__ == "__main__":
-    # Initialize the Telegram bot with ApplicationBuilder
+async def run_bot():
+    """Run the Telegram bot"""
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Add handlers
@@ -71,15 +144,24 @@ if __name__ == "__main__":
 
     PORT = int(os.getenv("PORT", 8443))
     
-    # For production deployment
     if os.getenv("ENV") == "production":
         await application.run_webhook(
             listen="0.0.0.0",
             port=PORT,
             webhook_url=f"{HEROKU_URL}/webhook"
         )
-    # For local testing
     else:
         await application.run_polling()
 
-    app.run(host="0.0.0.0", port=PORT)
+def run_flask():
+    """Run the Flask web server"""
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8443)))
+
+if __name__ == "__main__":
+    # Start Flask in a separate thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Run the Telegram bot in the main thread
+    asyncio.run(run_bot())
